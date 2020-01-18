@@ -97,17 +97,11 @@ def _impl(ctx):
                 for (k, v) in image_spec.items()
             ])]
 
-    # Add workspace_status_command files to the args that are pushed to the resolver and adds the
-    # files to the runfiles so they are available to the resolver executable.
-    stamp_inputs = [ctx.info_file, ctx.version_file]
-    stamp_args = " ".join(["--stamp-info-file=%s" % _runfiles(ctx, f) for f in stamp_inputs])
-    all_inputs += stamp_inputs
-
     image_chroot_arg = ctx.attr.image_chroot
     image_chroot_arg = ctx.expand_make_variables("image_chroot", image_chroot_arg, {})
     if "{" in ctx.attr.image_chroot:
         image_chroot_file = ctx.actions.declare_file(ctx.label.name + ".image-chroot-name")
-        _resolve(ctx, ctx.attr.image_chroot, image_chroot_file)
+        _resolve(ctx, image_chroot_file, string=ctx.attr.image_chroot)
         image_chroot_arg = "$(cat %s)" % _runfiles(ctx, image_chroot_file)
         all_inputs += [image_chroot_file]
 
@@ -119,6 +113,7 @@ def _impl(ctx):
         },
         output = ctx.outputs.substituted,
     )
+    _resolve(ctx, ctx.outputs.stamped, file=ctx.outputs.substituted)
 
     ctx.actions.expand_template(
         template = ctx.file._template,
@@ -130,8 +125,7 @@ def _impl(ctx):
             ]),
             "%{resolver_args}": " ".join(ctx.attr.resolver_args or []),
             "%{resolver}": _runfiles(ctx, ctx.executable.resolver),
-            "%{stamp_args}": stamp_args,
-            "%{yaml}": _runfiles(ctx, ctx.outputs.substituted),
+            "%{yaml}": _runfiles(ctx, ctx.outputs.stamped),
         },
         output = ctx.outputs.executable,
     )
@@ -141,23 +135,31 @@ def _impl(ctx):
             runfiles = ctx.runfiles(
                 files = [
                     ctx.executable.resolver,
-                    ctx.outputs.substituted,
+                    ctx.outputs.stamped,
                 ] + all_inputs,
                 transitive_files = ctx.attr.resolver[DefaultInfo].default_runfiles.files,
             ),
         ),
     ]
 
-def _resolve(ctx, string, output):
+def _resolve(ctx, output, string=None, file=None):
     stamps = [ctx.info_file, ctx.version_file]
     args = ctx.actions.args()
+
     args.add_all(stamps, format_each = "--stamp-info-file=%s")
-    args.add(string, format = "--format=%s")
     args.add(output, format = "--output=%s")
+
+    if string and not file:
+        args.add(string, format = "--format=%s")
+    elif file:
+        args.add(file, format = "--format-file=%s")
+    else:
+        fail("specify either a string or a file to be stamped (though not both)")
+
     ctx.actions.run(
         executable = ctx.executable._stamper,
         arguments = [args],
-        inputs = stamps,
+        inputs = stamps + ([file] if file else []),
         tools = [ctx.executable._stamper],
         outputs = [output],
         mnemonic = "Stamp",
@@ -170,7 +172,7 @@ def _common_impl(ctx):
     cluster_arg = ctx.expand_make_variables("cluster", cluster_arg, {})
     if "{" in ctx.attr.cluster:
         cluster_file = ctx.actions.declare_file(ctx.label.name + ".cluster-name")
-        _resolve(ctx, ctx.attr.cluster, cluster_file)
+        _resolve(ctx, cluster_file, string=ctx.attr.cluster)
         cluster_arg = "$(cat %s)" % _runfiles(ctx, cluster_file)
         files += [cluster_file]
 
@@ -178,7 +180,7 @@ def _common_impl(ctx):
     context_arg = ctx.expand_make_variables("context", context_arg, {})
     if "{" in ctx.attr.context:
         context_file = ctx.actions.declare_file(ctx.label.name + ".context-name")
-        _resolve(ctx, ctx.attr.context, context_file)
+        _resolve(ctx, context_file, string=ctx.attr.context)
         context_arg = "$(cat %s)" % _runfiles(ctx, context_file)
         files += [context_file]
 
@@ -186,7 +188,7 @@ def _common_impl(ctx):
     user_arg = ctx.expand_make_variables("user", user_arg, {})
     if "{" in ctx.attr.user:
         user_file = ctx.actions.declare_file(ctx.label.name + ".user-name")
-        _resolve(ctx, ctx.attr.user, user_file)
+        _resolve(ctx, user_file, string=ctx.attr.user)
         user_arg = "$(cat %s)" % _runfiles(ctx, user_file)
         files += [user_file]
 
@@ -194,7 +196,7 @@ def _common_impl(ctx):
     namespace_arg = ctx.expand_make_variables("namespace", namespace_arg, {})
     if "{" in ctx.attr.namespace:
         namespace_file = ctx.actions.declare_file(ctx.label.name + ".namespace-name")
-        _resolve(ctx, ctx.attr.namespace, namespace_file)
+        _resolve(ctx, namespace_file, string=ctx.attr.namespace)
         namespace_arg = "$(cat %s)" % _runfiles(ctx, namespace_file)
         files += [namespace_file]
 
@@ -365,6 +367,7 @@ _k8s_object = rule(
     executable = True,
     outputs = {
         "substituted": "%{name}.substituted.yaml",
+        "stamped": "%{name}.stamped.yaml",
     },
     implementation = _impl,
 )

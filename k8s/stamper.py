@@ -19,7 +19,9 @@ import sys
 parser = argparse.ArgumentParser(description='Resolve stamp references.')
 
 parser.add_argument('--format', action='store',
-                    help='The format string containing stamp variables.')
+                    help='A format string containing stamp variables.')
+parser.add_argument('--format-file', action='store',
+                    help='A file containing stamp variables.') 
 
 parser.add_argument('--output', action='store',
                     help='The filename into which we write the result.')
@@ -30,6 +32,14 @@ parser.add_argument('--stamp-info-file', action='append', required=False,
 
 def main():
   args = parser.parse_args()
+
+  if args.format and args.format_file:
+    raise Exception("Both --format and --format_file were specified")
+
+  to_format = args.format
+  if args.format_file:
+    with open(args.format_file, 'r') as f:
+      to_format = f.read()
 
   # Read our stamp variable files.
   format_args = {}
@@ -49,7 +59,7 @@ def main():
         format_args[key] = value
 
   with open(args.output, 'w') as f:
-    f.write(args.format.format(**format_args))
+    f.write(to_format.format(**format_args))
 
 
 if __name__ == '__main__':

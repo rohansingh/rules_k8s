@@ -121,10 +121,9 @@ func parseImageSpec(spec string) (imageSpec, error) {
 }
 
 // publishSingle publishes a docker image with the given spec to the remote
-// registry indicated in the image name. The image name is stamped with the
-// given stamper.
-// The stamped image name is returned referenced by its sha256 digest.
-func publishSingle(spec imageSpec, stamper *compat.Stamper) (string, error) {
+// registry indicated in the image name. The image name is returned referenced
+// by its sha256 digest.
+func publishSingle(spec imageSpec) (string, error) {
 	layers, err := spec.layers()
 	if err != nil {
 		return "", fmt.Errorf("unable to convert the layer parts in image spec for %s into a single comma separated argument: %v", spec.name, err)
@@ -138,20 +137,19 @@ func publishSingle(spec imageSpec, stamper *compat.Stamper) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("error reading image: %v", err)
 	}
-	stampedName := stamper.Stamp(spec.name)
 
 	var ref name.Reference
 	if *imgChroot != "" {
-		n := path.Join(*imgChroot, stampedName)
+		n := path.Join(*imgChroot, spec.name)
 		t, err := name.NewTag(n, name.WeakValidation)
 		if err != nil {
-			return "", fmt.Errorf("unable to create a docker tag from stamped name %q: %v", n, err)
+			return "", fmt.Errorf("unable to create a docker tag from name %q: %v", n, err)
 		}
 		ref = t
 	} else {
-		t, err := name.NewTag(stampedName, name.WeakValidation)
+		t, err := name.NewTag(spec.name, name.WeakValidation)
 		if err != nil {
-			return "", fmt.Errorf("unable to create a docker tag from stamped name %q: %v", stampedName, err)
+			return "", fmt.Errorf("unable to create a docker tag from name %q: %v", spec.name, err)
 		}
 		ref = t
 	}
@@ -173,14 +171,14 @@ func publishSingle(spec imageSpec, stamper *compat.Stamper) (string, error) {
 }
 
 // publish publishes the image with the given spec. It returns:
-// 1. A map from the unstamped & tagged image name to the stamped image name
+// 1. A map from the untagged image name to the pushed image name
 //    referenced by its sha256 digest.
-// 2. A set of unstamped & tagged image names that were pushed to the registry.
-func publish(spec []imageSpec, stamper *compat.Stamper) (map[string]string, map[string]bool, error) {
+// 2. A set of untagged image names that were pushed to the registry.
+func publish(spec []imageSpec) (map[string]string, map[string]bool, error) {
 	overrides := make(map[string]string)
 	unseen := make(map[string]bool)
 	for _, s := range spec {
-		digestRef, err := publishSingle(s, stamper)
+		digestRef, err := publishSingle(s)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -417,11 +415,6 @@ func main() {
 	flag.Var(&stampInfoFile, "stamp-info-file", "One or more Bazel stamp info files.")
 	flag.Parse()
 
-	stamper, err := compat.NewStamper(stampInfoFile)
-	if err != nil {
-		log.Fatalf("Failed to initialize the stamper: %v", err)
-	}
-
 	specs := []imageSpec{}
 	for _, s := range imgSpecs {
 		spec, err := parseImageSpec(s)
@@ -430,7 +423,7 @@ func main() {
 		}
 		specs = append(specs, spec)
 	}
-	resolvedImages, unseen, err := publish(specs, stamper)
+	resolvedImages, unseen, err := publish(specs)
 	if err != nil {
 		log.Fatalf("Unable to publish images: %v", err)
 	}
